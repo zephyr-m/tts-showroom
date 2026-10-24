@@ -1,0 +1,8 @@
+vosk-tts
+transformers
+huggingface_hub
+onnxruntime
+num2words
+edge-tts
+miniaudio
+numpy

@@ -14,7 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-HOST, PORT = "127.0.0.1", 8765
+HOST = os.environ.get("HOST", "127.0.0.1")
+PORT = int(os.environ.get("PORT", "8765"))
 LOCK = threading.Lock()
 VOSK = None
 TERA = None

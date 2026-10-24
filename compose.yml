@@ -1,0 +1,10 @@
+services:
+  bench:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - cache:/root/.cache
+
+volumes:
+  cache:
