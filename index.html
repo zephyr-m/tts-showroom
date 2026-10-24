@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Верстак</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css">
+  <style>
+    .aplayer button {
+      width: auto;
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (max-width: 768px) {
+      .stage { grid-template-columns: 1fr; }
+    }
+    main.container {
+      max-width: none;
+      width: auto;
+      margin-inline: clamp(1.25rem, 3vw, 4rem);
+    }
+    #player { min-height: 500px; }
+    #player .aplayer { margin: 0; box-shadow: none; }
+    #player .aplayer,
+    #player .aplayer-list,
+    #player .aplayer-list ol {
+      max-height: none !important;
+      overflow: visible !important;
+    }
+    #player .aplayer-list { display: block !important; }
+    #player .aplayer-list ol li {
+      height: auto;
+      line-height: 1.3;
+      overflow: visible;
+      padding: .4rem .7rem .55rem;
+    }
+    #player .wave { height: 36px; margin-top: .35rem; overflow: hidden; }
+    #bench .lane {
+      display: flex;
+      gap: .75rem;
+      align-items: flex-start;
+      overflow-x: auto;
+    }
+    #bench .lane article {
+      flex: 0 0 18rem;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+<main class="container">
+  <h1>Верстак</h1>
+  <form id="form">
+    <div role="group" id="texts"></div>
+    <div class="stage">
+      <label>Текст
+        <textarea name="text" rows="6"></textarea>
+      </label>
+      <div id="player"></div>
+    </div>
+    <div class="grid">
+      <fieldset>
+        <legend>Движок</legend>
+        <label><input type="radio" name="engine" value="vosk"> <a href="https://github.com/alphacep/vosk-tts" target="_blank" rel="noreferrer">vosk-tts</a></label>
+        <label><input type="radio" name="engine" value="tera" checked> <a href="https://huggingface.co/TeraSpace/TeraTTSv2" target="_blank" rel="noreferrer">TeraTTSv2</a></label>
+        <label><input type="radio" name="engine" value="edge"> <a href="https://github.com/rany2/edge-tts" target="_blank" rel="noreferrer">edge-tts</a></label>
+      </fieldset>
+      <label>Голос
+        <select name="voice"></select>
+      </label>
+    </div>
+    <fieldset id="tera-knobs">
+      <legend>TeraTTSv2</legend>
+      <label>Скорость <output id="duration-out">1.15</output>
+        <input type="range" name="duration" min="0.75" max="1.35" step="0.05" value="1.15">
+      </label>
+      <label>Шум <output id="seed-out">1234</output>
+        <input type="range" name="seed" min="0" max="9999" step="1" value="1234">
+      </label>
+      <div class="grid">
+        <label>Примешать
+          <select name="blend_voice"></select>
+        </label>
+        <label>Доля <output id="blend-out">0.00</output>
+          <input type="range" name="blend" min="0" max="1" step="0.05" value="0">
+        </label>
+      </div>
+    </fieldset>
+    <fieldset id="edge-knobs" hidden>
+      <legend>edge-tts</legend>
+      <label>Скорость <output id="rate-out">+0%</output>
+        <input type="range" name="rate" min="-50" max="100" step="5" value="0">
+      </label>
+      <label>Высота <output id="pitch-out">+0 Гц</output>
+        <input type="range" name="pitch" min="-100" max="100" step="5" value="0">
+      </label>
+      <label>Громкость <output id="volume-out">+0%</output>
+        <input type="range" name="volume" min="-50" max="100" step="5" value="0">
+      </label>
+    </fieldset>
+    <button type="button" id="arm">Собрать цепочку</button>
+  </form>
+  <p id="latency"><strong>До первого звука</strong> ещё не запускалось</p>
+  <div id="bench"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+<script>
+const voices = {
+  vosk: ["0", "1", "2", "3", "4"],
+  tera: ["ru_f1", "ru_m5", "ru_f2", "ru_m1"],
+  edge: [
+    ["ru-RU-SvetlanaNeural", "Светлана, женский"],
+    ["ru-RU-DmitryNeural", "Дмитрий, мужской"]
+  ]
+};
+const texts = [
+  ["Тетрадь", "На столе лежит толстая тетрадь. В ней записаны короткие фразы для проверки голоса. Сегодня ветер тихий, а чай уже остыл. Слышно ли разницу между этими двумя движками?"],
+  ["Вопрос", "Скажи, ты правда слышишь, где ударение пляшет? А если фраза короткая, голос не срывается?"],
+  ["Счёт", "Семнадцатый поезд выходит в восемь сорок. Билет стоит тысячу двести пятьдесят рублей, место четырнадцатое у окна."],
+  ["Имена", "Алёна везёт мёд в Щёлково. Её ёж живёт у Фёдора, а не у Юлии."],
+  ["Список", "Возьми хлеб, молоко, соль и чёрный чай. Если чая нет, купи корицу, лимон и две ложки мёда."],
+  ["Края", "Цифры. В 2024 году поезд № 17 вышел в 8:40. Билет стоил 1250 рублей, а в объявлении было написано 1 250. Скидка 12,5%. На счёте осталось −3,14. Телефон 8 903 111-22-33. Дом 4/6, квартира 12. Дата 23.10.2026 и рядом 23 октября 2026 года. От 5 до 10, и ещё 5-10.\n\nСокращения. И т.д., и т.п., см. примечание. Вес 2 кг, скорость 60 км/ч. СССР, РФ, МГУ и др. Встреча в 15 ч 30 мин. А. С. Пушкин, глава III.\n\nУдарения. Дорогой замок и дверной замок. Ржаная мука, и он мука. Он стоит у двери, а книга стоит 100 рублей. Я плачу воду, и я плачу от смеха. Потом мы пойдём, и это не потом.\n\nЁ и щи. Алёна везёт мёд. Ёж в Щёлкове. Подъём крутой, въезд узкий, съёмка завтра. Пьеса, объявление, въедливый.\n\nЗнаки. Это вопрос? Это крик! Это пауза… И три точки... Тире — вот оно. «Кавычки» и (скобки) тоже. Сколько будет 2 и 2?\n\nЛатиница. Подключи Wi-Fi, нажми OK и открой test.example.com. Модель читает слово test.\n\nРегистр. внимание. Внимание. ВНИМАНИЕ.\n\nКрай. А. Я. Да. Нет. Раз-два-три. Шла Саша по шоссе и сосала сушку. Ряд: 1, 2, 3, 10, 100, 1000."]
+];
+const form = document.querySelector("#form");
+const tabs = document.querySelector("#texts");
+const select = form.voice;
+const bench = document.querySelector("#bench");
+const latency = document.querySelector("#latency");
+let job = null;
+let startedAt = 0;
+let heard = false;
+let clock = 0;
+
+function stopClock(token, note) {
+  if (token !== runToken || heard) return;
+  heard = true;
+  cancelAnimationFrame(clock);
+  const seconds = ((performance.now() - startedAt) / 1000).toFixed(2);
+  latency.innerHTML = `<strong>До первого звука</strong> ${seconds} с${note ? " " + note : ""}`;
+}
+
+function startClock(token) {
+  cancelAnimationFrame(clock);
+  const tick = () => {
+    if (token !== runToken || heard) return;
+    const seconds = ((performance.now() - startedAt) / 1000).toFixed(2);
+    latency.innerHTML = `<strong>До первого звука</strong> ${seconds} с`;
+    clock = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function fill() {
+  const selected = select.value;
+  select.replaceChildren();
+  for (const item of voices[form.engine.value]) {
+    const [id, label] = Array.isArray(item) ? item : [item, item];
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = label;
+    select.append(option);
+  }
+  if ([...select.options].some((option) => option.value === selected)) {
+    select.value = selected;
+  }
+  fillBlend();
+  document.querySelector("#tera-knobs").hidden = form.engine.value !== "tera";
+  document.querySelector("#edge-knobs").hidden = form.engine.value !== "edge";
+}
+
+function fillBlend() {
+  const blend = form.blend_voice;
+  const current = blend.value;
+  blend.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "не примешивать";
+  blend.append(none);
+  for (const voice of voices.tera) {
+    if (voice === select.value) continue;
+    const option = document.createElement("option");
+    option.value = voice;
+    option.textContent = voice;
+    blend.append(option);
+  }
+  if ([...blend.options].some((option) => option.value === current)) blend.value = current;
+  form.blend.disabled = blend.value === "";
+}
+
+function paintPlot(canvas, plot) {
+  const scale = 4;
+  canvas.width = plot.w * scale;
+  canvas.height = plot.h * scale;
+  canvas.hidden = false;
+  const pen = canvas.getContext("2d");
+  plot.values.forEach((row, y) => {
+    row.forEach((value, x) => {
+      const shade = Math.round(255 * (1 - value));
+      pen.fillStyle = `rgb(${shade} ${shade} ${shade})`;
+      pen.fillRect(x * scale, y * scale, scale, scale);
+    });
+  });
+}
+
+let runToken = 0;
+
+function paintWave(canvas, wave, position) {
+  canvas.width = wave.length * 2;
+  canvas.height = 120;
+  canvas.hidden = false;
+  canvas._wave = wave;
+  const pen = canvas.getContext("2d");
+  pen.clearRect(0, 0, canvas.width, canvas.height);
+  pen.strokeStyle = "currentColor";
+  pen.beginPath();
+  wave.forEach((peak, index) => {
+    const x = index * 2 + 1;
+    pen.moveTo(x, 60 - peak * 56);
+    pen.lineTo(x, 60 + peak * 56);
+  });
+  pen.stroke();
+  if (position > 0) {
+    const x = Math.round(position * canvas.width);
+    pen.strokeStyle = "#e23";
+    pen.lineWidth = 2;
+    pen.beginPath();
+    pen.moveTo(x, 0);
+    pen.lineTo(x, canvas.height);
+    pen.stroke();
+  }
+}
+
+let lanes = [];
+
+function card(label) {
+  const article = document.createElement("article");
+  const header = document.createElement("header");
+  const title = document.createElement("strong");
+  const note = document.createElement("span");
+  title.textContent = label;
+  note.textContent = "жду";
+  header.append(title, " ", note);
+  const pre = document.createElement("pre");
+  const plot = document.createElement("canvas");
+  const wave = document.createElement("canvas");
+  pre.hidden = true;
+  plot.hidden = true;
+  wave.hidden = true;
+  article.append(header, pre, plot, wave);
+  return article;
+}
+
+function lanesFor(stages) {
+  if (lanes.length) return lanes;
+  lanes = stages.map((title, step) => {
+    const section = document.createElement("section");
+    const head = document.createElement("header");
+    const strong = document.createElement("strong");
+    strong.textContent = `${step + 1}. ${title}`;
+    head.append(strong);
+    const row = document.createElement("div");
+    row.className = "lane";
+    section.append(head, row);
+    bench.append(section);
+    return row;
+  });
+  return lanes;
+}
+
+async function runStep(article, index, token) {
+  const note = article.querySelector("span");
+  const pre = article.querySelector("pre");
+  const [plotCanvas, waveCanvas] = article.querySelectorAll("canvas");
+  note.textContent = "считаю";
+  const response = await fetch(`/bench/${job.id}/step`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({step: index})
+  });
+  if (token !== runToken) return false;
+  if (!response.ok) {
+    pre.hidden = false;
+    pre.textContent = await response.text();
+    note.textContent = "ошибка";
+    return false;
+  }
+  const data = await response.json();
+  if (token !== runToken) return false;
+  note.textContent = `${data.ms} мс`;
+  pre.hidden = false;
+  pre.textContent = data.lines.join("\n\n");
+  if (data.plot) paintPlot(plotCanvas, data.plot);
+  if (data.wave) paintWave(waveCanvas, data.wave, 0);
+  return data;
+}
+
+function showText(index) {
+  if (index >= 0) form.text.value = texts[index][1];
+  [...tabs.children].forEach((button, buttonIndex) => {
+    button.classList.toggle("secondary", buttonIndex !== index);
+  });
+}
+
+texts.forEach(([title], index) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = title;
+  button.addEventListener("click", () => showText(index));
+  tabs.append(button);
+});
+
+form.text.addEventListener("input", () => {
+  showText(texts.findIndex((item) => item[1] === form.text.value));
+});
+
+function splitLines(text) {
+  return text
+    .split(/\n+/)
+    .flatMap((chunk) => chunk.trim().split(/(?<=[.!?…])\s+/))
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+form.text.addEventListener("paste", (event) => {
+  const pasted = event.clipboardData && event.clipboardData.getData("text");
+  if (!pasted) return;
+  event.preventDefault();
+  form.text.setRangeText(splitLines(pasted).join("\n"), form.text.selectionStart, form.text.selectionEnd, "end");
+  form.text.dispatchEvent(new Event("input"));
+});
+
+let queuePlayer = null;
+let trackUrls = [];
+let tracks = [];
+let waveRows = [];
+let waitingForNext = false;
+
+function resetPlayer() {
+  waitingForNext = false;
+  waveRows.forEach((item) => item.destroy());
+  waveRows = [];
+  tracks = [];
+  if (queuePlayer) queuePlayer.list.clear();
+  for (const url of trackUrls) URL.revokeObjectURL(url);
+  trackUrls = [];
+}
+
+function openPlayer() {
+  if (queuePlayer) return;
+  queuePlayer = new APlayer({
+    container: document.querySelector("#player"),
+    fixed: false,
+    autoplay: false,
+    loop: "none",
+    order: "list",
+    listFolded: false,
+    listMaxHeight: "none",
+    audio: []
+  });
+  queuePlayer.on("playing", () => {
+    if (startedAt) stopClock(runToken);
+  });
+  queuePlayer.on("timeupdate", () => {
+    const wave = waveRows[queuePlayer.list.index];
+    if (!wave || !wave.getDuration()) return;
+    const time = queuePlayer.audio.currentTime;
+    if (Math.abs(wave.getCurrentTime() - time) > 0.08) wave.setTime(time);
+  });
+  queuePlayer.on("ended", () => {
+    if (queuePlayer && queuePlayer.audio.paused) waitingForNext = true;
+  });
+}
+
+function seekRow(index, time) {
+  if (!queuePlayer) return;
+  waitingForNext = false;
+  if (queuePlayer.list.index !== index) {
+    queuePlayer.list.switch(index);
+    const audio = queuePlayer.audio;
+    const go = () => {
+      audio.removeEventListener("loadedmetadata", go);
+      queuePlayer.seek(time);
+      queuePlayer.play();
+    };
+    audio.addEventListener("loadedmetadata", go);
+    return;
+  }
+  queuePlayer.seek(time);
+  if (queuePlayer.audio.paused) queuePlayer.play();
+}
+
+function mountWave(index) {
+  const row = document.querySelectorAll("#player .aplayer-list ol li")[index];
+  const track = tracks[index];
+  if (!row || !track || waveRows[index]) return;
+  row.querySelectorAll(".wave").forEach((node) => node.remove());
+  const box = document.createElement("div");
+  box.className = "wave";
+  box.addEventListener("pointerdown", (event) => event.stopPropagation());
+  box.addEventListener("click", (event) => event.stopPropagation());
+  row.append(box);
+  const wave = WaveSurfer.create({
+    container: box,
+    url: track.url,
+    peaks: track.peaks ? [track.peaks] : undefined,
+    height: 36,
+    barWidth: 3,
+    barGap: 2,
+    barRadius: 2,
+    cursorWidth: 0,
+    normalize: true,
+    interact: true,
+    dragToSeek: true,
+    autoplay: false,
+    waveColor: "rgba(128,128,128,.45)",
+    progressColor: "#3390ec"
+  });
+  wave.on("interaction", (time) => seekRow(index, time));
+  wave.on("ready", () => {
+    wave.pause();
+    if (queuePlayer && queuePlayer.list.index === index) wave.setTime(queuePlayer.audio.currentTime || 0);
+  });
+  waveRows[index] = wave;
+}
+
+function pushTrack(track, token) {
+  if (token !== runToken) return;
+  openPlayer();
+  const first = queuePlayer.list.audios.length === 0;
+  tracks.push(track);
+  const caughtUp = waitingForNext;
+  const kept = [];
+  document.querySelectorAll("#player .aplayer-list ol li").forEach((row) => {
+    const wave = row.querySelector(".wave");
+    if (wave) wave.remove();
+    kept.push(wave);
+  });
+  queuePlayer.list.add([track]);
+  document.querySelectorAll("#player .aplayer-list ol li").forEach((row, index) => {
+    if (kept[index]) row.append(kept[index]);
+  });
+  mountWave(tracks.length - 1);
+  if (first) {
+    queuePlayer.play();
+    setTimeout(() => {
+      if (token !== runToken || heard) return;
+      if (queuePlayer.audio.paused) stopClock(token, "волна готова, жду колонку");
+    }, 400);
+    return;
+  }
+  if (!caughtUp) return;
+  waitingForNext = false;
+  queuePlayer.list.switch(queuePlayer.list.audios.length - 1);
+  queuePlayer.play();
+}
+
+openPlayer();
+
+function speakPayload(text) {
+  return {
+    text,
+    engine: form.engine.value,
+    voice: select.value,
+    duration: Number(form.duration.value),
+    blend_voice: form.blend_voice.value,
+    blend: Number(form.blend.value),
+    seed: Number(form.seed.value),
+    rate: Number(form.rate.value),
+    pitch: Number(form.pitch.value),
+    volume: Number(form.volume.value)
+  };
+}
+
+document.querySelector("#arm").addEventListener("click", async () => {
+  const token = ++runToken;
+  resetPlayer();
+  const lines = form.text.value.split("\n").map((line) => line.trim()).filter(Boolean);
+  startedAt = performance.now();
+  heard = false;
+  startClock(token);
+  bench.replaceChildren();
+  lanes = [];
+  if (!lines.length) {
+    bench.textContent = "пустой текст";
+    stopClock(token, "запрос не прошёл");
+    return;
+  }
+  for (let index = 0; index < lines.length; index += 1) {
+    if (token !== runToken) return;
+    try {
+      const response = await fetch("/bench", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(speakPayload(lines[index]))
+      });
+      if (token !== runToken) return;
+      if (!response.ok) throw new Error(await response.text());
+      job = await response.json();
+      const label = `${index + 1}. ${lines[index]}`;
+      const cards = lanesFor(job.stages).map((row) => {
+        const article = card(label);
+        row.append(article);
+        return article;
+      });
+      let peaks = null;
+      for (let step = 0; step < job.stages.length; step += 1) {
+        const data = await runStep(cards[step], step, token);
+        if (token !== runToken) return;
+        if (!data) {
+          stopClock(token, "цепочка оборвалась");
+          return;
+        }
+        if (data.wave) peaks = data.wave;
+      }
+      const wav = await fetch(`/bench/${job.id}.wav`);
+      if (!wav.ok) throw new Error(await wav.text());
+      const url = URL.createObjectURL(await wav.blob());
+      if (token !== runToken) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      trackUrls.push(url);
+      const voice = select.selectedOptions[0] ? select.selectedOptions[0].textContent : select.value;
+      pushTrack({name: lines[index], artist: voice, url, peaks}, token);
+    } catch (error) {
+      if (token !== runToken) return;
+      const note = document.createElement("p");
+      note.textContent = error.message;
+      bench.append(note);
+      stopClock(token, "цепочка оборвалась");
+      return;
+    }
+  }
+  if (token === runToken) {
+    const done = document.createElement("p");
+    done.textContent = `готово, ${lines.length}`;
+    bench.append(done);
+  }
+});
+
+form.addEventListener("change", (event) => {
+  if (event.target.name === "engine") fill();
+  if (event.target.name === "voice") fillBlend();
+  if (event.target.name === "blend_voice") form.blend.disabled = form.blend_voice.value === "";
+});
+
+form.duration.addEventListener("input", () => {
+  document.querySelector("#duration-out").textContent = Number(form.duration.value).toFixed(2);
+});
+
+form.blend.addEventListener("input", () => {
+  document.querySelector("#blend-out").textContent = Number(form.blend.value).toFixed(2);
+});
+
+form.seed.addEventListener("input", () => {
+  document.querySelector("#seed-out").textContent = String(Number(form.seed.value));
+});
+
+function signed(value, suffix) {
+  const number = Number(value);
+  return `${number >= 0 ? "+" : ""}${number}${suffix}`;
+}
+
+form.rate.addEventListener("input", () => {
+  document.querySelector("#rate-out").textContent = signed(form.rate.value, "%");
+});
+
+form.pitch.addEventListener("input", () => {
+  document.querySelector("#pitch-out").textContent = signed(form.pitch.value, " Гц");
+});
+
+form.volume.addEventListener("input", () => {
+  document.querySelector("#volume-out").textContent = signed(form.volume.value, "%");
+});
+
+showText(0);
+fill();
+
+fetch("/voices").then((response) => response.ok ? response.json() : null).then((data) => {
+  if (!data || !data.edge || !data.edge.length) return;
+  voices.edge = data.edge.map((item) => [item.id, item.label]);
+  if (form.engine.value === "edge") fill();
+}).catch(() => {});
+</script>
+</body>
+</html>
