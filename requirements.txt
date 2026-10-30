@@ -1,7 +1,7 @@
 vosk-tts
 transformers
 huggingface_hub
-onnxruntime
+onnxruntime-gpu==1.31.0
 num2words
 edge-tts
 miniaudio

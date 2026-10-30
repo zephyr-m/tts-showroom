@@ -7,14 +7,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cu130 \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir --force-reinstall onnxruntime-gpu==1.31.0
 
 COPY server.py index.html ./
 
 ENV TTS_LIBS_READY=1 \
     HOST=0.0.0.0 \
-    PORT=8765
+    PORT=8765 \
+    LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cu13/lib:/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib
 
 EXPOSE 8765
 
